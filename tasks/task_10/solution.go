@@ -14,7 +14,7 @@ import (
 )
 
 type Task struct {
-	Id        string    `json:"Id"`
+	ID        string    `json:"id"`
 	Title     string    `json:"title"`
 	Done      bool      `json:"done"`
 	UpdatedAt time.Time `json:"updatedAt"`
@@ -22,16 +22,16 @@ type Task struct {
 
 type TaskRepo interface {
 	Create(title string) (Task, error)
-	Get(Id string) (Task, bool)
+	Get(id string) (Task, bool)
 	List(done bool) []Task
-	SetDone(Id string, done bool) (Task, error)
+	SetDone(id string, done bool) (Task, error)
 }
 
 type Clock interface{ Now() time.Time }
 
 var (
 	ErrNotFound     = errors.New("task not found")
-	ErrInvalIdTitle = errors.New("invalId title")
+	ErrInvalidTitle = errors.New("invalid title")
 )
 
 type inMemoryTaskRepo struct {
@@ -40,7 +40,7 @@ type inMemoryTaskRepo struct {
 	tasks map[string]Task
 }
 
-var nextTaskId atomic.Uint64
+var nextTaskID atomic.Uint64
 
 func NewInMemoryTaskRepo(clock Clock) TaskRepo {
 	return &inMemoryTaskRepo{
@@ -52,27 +52,27 @@ func NewInMemoryTaskRepo(clock Clock) TaskRepo {
 func (r *inMemoryTaskRepo) Create(title string) (Task, error) {
 	title = strings.TrimSpace(title)
 	if title == "" {
-		return Task{}, ErrInvalIdTitle
+		return Task{}, ErrInvalidTitle
 	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	task := Task{
-		Id:        strconv.FormatUint(nextTaskId.Add(1), 10),
+		ID:        strconv.FormatUint(nextTaskID.Add(1), 10),
 		Title:     title,
 		UpdatedAt: r.clock.Now(),
 	}
 
-	r.tasks[task.Id] = task
+	r.tasks[task.ID] = task
 	return task, nil
 }
 
-func (r *inMemoryTaskRepo) Get(Id string) (Task, bool) {
+func (r *inMemoryTaskRepo) Get(id string) (Task, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	task, ok := r.tasks[Id]
+	task, ok := r.tasks[id]
 	return task, ok
 }
 
@@ -90,11 +90,11 @@ func (r *inMemoryTaskRepo) List(done bool) []Task {
 	return tasks
 }
 
-func (r *inMemoryTaskRepo) SetDone(Id string, done bool) (Task, error) {
+func (r *inMemoryTaskRepo) SetDone(id string, done bool) (Task, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	task, ok := r.tasks[Id]
+	task, ok := r.tasks[id]
 	if !ok {
 		return Task{}, ErrNotFound
 	}
@@ -105,7 +105,7 @@ func (r *inMemoryTaskRepo) SetDone(Id string, done bool) (Task, error) {
 
 	task.Done = done
 	task.UpdatedAt = r.clock.Now()
-	r.tasks[Id] = task
+	r.tasks[id] = task
 	return task, nil
 }
 
@@ -134,17 +134,17 @@ func (h *httpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	Id := strings.TrimPrefix(r.URL.Path, "/tasks/")
-	if Id == "" || strings.Contains(Id, "/") {
+	id := strings.TrimPrefix(r.URL.Path, "/tasks/")
+	if id == "" || strings.Contains(id, "/") {
 		http.NotFound(w, r)
 		return
 	}
 
 	switch r.Method {
 	case http.MethodGet:
-		h.handleGet(w, r, Id)
+		h.handleGet(w, r, id)
 	case http.MethodPatch:
-		h.handlePatch(w, r, Id)
+		h.handlePatch(w, r, id)
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
@@ -156,13 +156,13 @@ func (h *httpHandler) handleCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := decodeStrictJSON(r.Body, &request); err != nil || request.Title == nil {
-		http.Error(w, "invalId request body", http.StatusBadRequest)
+		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	task, err := h.repo.Create(*request.Title)
 	if err != nil {
-		if errors.Is(err, ErrInvalIdTitle) {
+		if errors.Is(err, ErrInvalidTitle) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -174,8 +174,8 @@ func (h *httpHandler) handleCreate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, task)
 }
 
-func (h *httpHandler) handleGet(w http.ResponseWriter, r *http.Request, Id string) {
-	task, ok := h.repo.Get(Id)
+func (h *httpHandler) handleGet(w http.ResponseWriter, r *http.Request, id string) {
+	task, ok := h.repo.Get(id)
 	if !ok {
 		http.NotFound(w, r)
 		return
@@ -188,7 +188,7 @@ func (h *httpHandler) handleList(w http.ResponseWriter, r *http.Request) {
 	done := false
 	if values, exists := r.URL.Query()["done"]; exists {
 		if len(values) != 1 {
-			http.Error(w, "invalId done query parameter", http.StatusBadRequest)
+			http.Error(w, "invalid done query parameter", http.StatusBadRequest)
 			return
 		}
 
@@ -197,7 +197,7 @@ func (h *httpHandler) handleList(w http.ResponseWriter, r *http.Request) {
 			done = true
 		case "false":
 		default:
-			http.Error(w, "invalId done query parameter", http.StatusBadRequest)
+			http.Error(w, "invalid done query parameter", http.StatusBadRequest)
 			return
 		}
 	}
@@ -209,24 +209,24 @@ func (h *httpHandler) handleList(w http.ResponseWriter, r *http.Request) {
 
 	sort.Slice(tasks, func(i, j int) bool {
 		if tasks[i].UpdatedAt.Equal(tasks[j].UpdatedAt) {
-			return tasks[i].Id < tasks[j].Id
+			return tasks[i].ID < tasks[j].ID
 		}
 		return tasks[i].UpdatedAt.After(tasks[j].UpdatedAt)
 	})
 	writeJSON(w, http.StatusOK, tasks)
 }
 
-func (h *httpHandler) handlePatch(w http.ResponseWriter, r *http.Request, Id string) {
+func (h *httpHandler) handlePatch(w http.ResponseWriter, r *http.Request, id string) {
 	var request struct {
 		Done *bool `json:"done"`
 	}
 
 	if err := decodeStrictJSON(r.Body, &request); err != nil || request.Done == nil {
-		http.Error(w, "invalId request body", http.StatusBadRequest)
+		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	task, err := h.repo.SetDone(Id, *request.Done)
+	task, err := h.repo.SetDone(id, *request.Done)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			http.NotFound(w, r)
